@@ -3,14 +3,15 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "i2c/i2c.h"
+
 #include <time.h>
 #include <math.h>
 
 #define PCF_ADDRESS	0x38
 #define MPU_ADDRESS	0x68
 #define BUS_I2C		0
-#define SCL 14
-#define SDA 12
+#define SCL 		14
+#define SDA 		12
 
 //					mask	returned value
 #define button1		0x20	// 0b ??0? ????
@@ -27,7 +28,54 @@
 
 #define gpio_wemos_led	2
 
+// 		defines for the accelometer
+#define G_CONST 	16384
+#define G_TO_MS		9.84
+#define MAX_IDLE	5
+
+typedef struct vect {
+	float x;
+	float y;
+	float z;
+} vector;
+
+typedef struct vect_uint8 {
+	uint8_t x;
+	uint8_t y;
+	uint8_t z;
+} uint8_vector;
+
+typedef struct vect_uint16 {
+	uint16_t x;
+	uint16_t y;
+	uint16_t z;
+} uint16_vector;
+
+vector acceleration;
+vector acceleration_old;
+vector speed;
+vector position;
+
+vector cal;
+
+uint8_vector self_test;
+
+// to count the steps until last time idle
+uint8_t unchanged_counter = 0;
+
+//	function to reset vector values back to 0
+void reset_vector(vector *vect) {
+	vect->x = 0.0f; vect->y = 0.0f; vect->z = 0.0f;
+}
+
+void reset_uint16_vector(uint16_vector *vect) {
+	vect->x = 0; vect->y = 0; vect->z = 0;
+}
+
 typedef enum {
+	MPU9250_SELF_TEST_X_ACCEL = 0x0d,
+	MPU9250_SELF_TEST_Y_ACCEL = 0x0e,
+	MPU9250_SELF_TEST_Z_ACCEL = 0x0f,
 	MPU9250_ACCEL_X = 0x3b,
 	MPU9250_ACCEL_Y = 0x3d,
 	MPU9250_ACCEL_Z = 0x3f,
@@ -84,7 +132,7 @@ void pcf_task(void *pvParameters) {
 }
 
 // read 2 bytes from MPU-9250 on I2C bus
-uint16_t read_bytes_mpu(mpu9250_quantity quantity) {
+int16_t read_bytes_mpu(mpu9250_quantity quantity) {
 
 	// high and low byte of quantity
 	uint8_t data_high, data_low;
@@ -94,7 +142,7 @@ uint16_t read_bytes_mpu(mpu9250_quantity quantity) {
 	register_address++;
 	i2c_slave_read(BUS_I2C, MPU_ADDRESS, &register_address, &data_low, 1);
 
-	return (data_high << 8) + data_low;
+	return (int16_t) (data_high << 8) + data_low;
 }
 
 uint8_t read_bytes_mpu_config(mpu9250_quantity quantity) {
@@ -108,11 +156,96 @@ uint8_t read_bytes_mpu_config(mpu9250_quantity quantity) {
 	return data;
 }
 
+// read 1 byte from MPU-9250 on I2C bus
+uint8_t read_byte_mpu(mpu9250_quantity quantity) {
+
+	uint8_t data;
+	uint8_t register_address = (uint8_t) quantity;
+
+	i2c_slave_read(BUS_I2C, MPU_ADDRESS, &register_address, &data, 1);
+
+	return data;
+}
+
+// get an absolute difference between x1 and x2
+float absf(float x1, float x2) {
+	if(x1 > x2)
+		return x1 - x2;
+	else
+		return x2 - x1;	
+}
+
 void write_bytes_mpu(mpu9250_quantity quantity, uint8_t data) {
 
 	uint8_t register_address = (uint8_t) quantity;
 
 	i2c_slave_write(BUS_I2C, MPU_ADDRESS, &register_address, &data, 1);
+}
+
+void init_vectors() {
+
+	reset_vector(&acceleration);
+	reset_vector(&acceleration_old);
+	reset_vector(&speed);
+	reset_vector(&position);
+	reset_vector(&cal);
+
+	// read the self_test values - unused
+	self_test.x = read_byte_mpu(MPU9250_SELF_TEST_X_ACCEL);
+	self_test.y = read_byte_mpu(MPU9250_SELF_TEST_Y_ACCEL);
+	self_test.z = read_byte_mpu(MPU9250_SELF_TEST_Z_ACCEL);
+}
+
+// converts the accelometer output to m/s^2
+float convert_to_accel(int16_t output) {
+	return (output * G_TO_MS) / G_CONST;
+}
+
+void read_accel_mpu(vector *vect_acc, vector *vect_old) {
+
+	// Set the sensitivity of our movement - if we don't breach this value, then don't change acceleration
+	float threshold = 0.5f;	// [m/s^2]
+	float new_accel = 0.0;
+
+	// if acceleration doesn't change in 3 consecutive measures, reset it
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
+	if (absf(new_accel, vect_old->x) > threshold) {
+		// update both acc vectors x
+		vect_acc->x = new_accel;
+		vect_old->x = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	}
+
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
+	if (absf(new_accel, vect_old->y) > threshold) {
+		// update both acc vectors y
+		vect_acc->y = new_accel;
+		vect_old->y = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	}
+
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
+	if (absf(new_accel, vect_old->z) > threshold) {
+		// update both acc vectors
+		vect_acc->z = new_accel;
+		vect_old->z = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	}
+
+	if (unchanged_counter >= MAX_IDLE) {
+		// in this case we assume tablet is not moving, so we reset the acceleration and speed to zero - idle
+		reset_vector(vect_acc);
+		reset_vector(vect_old);
+		reset_vector(&speed);
+	}
+
+	unchanged_counter++;
 }
 
 // Returns POSITIVE(!!) (index+mod)%3
@@ -173,8 +306,6 @@ void mpu_task(void *pvParameters) {
 	uint32_t oldTime = xTaskGetTickCount();
 	uint32_t deltaTime = 0;
 
-	// TODO: ACCELEROMETER
-
 	while (1) {
 
 		// GYRO_OUT = gyro_sensitivity * angular_rate
@@ -217,8 +348,20 @@ void mpu_task(void *pvParameters) {
 		//	rotationZ += rotationZ_delta;
 		
 		//printf("ABS TEST %f | %f\n", rotationZ_delta, fabs(rotationZ_delta));
+
+		read_accel_mpu(&acceleration, &acceleration_old);
+
 		taskEXIT_CRITICAL();
 
+		// new speed is calculated with a linear formula for integration
+		speed.x = speed.x + acceleration.x * (deltaTime / 1000.0);
+		speed.y = speed.y + acceleration.y * (deltaTime / 1000.0);
+		speed.z = speed.z + acceleration.z * (deltaTime / 1000.0);
+
+		// new position is calculated with a linear formula for integration
+		position.x = position.x + speed.x * (deltaTime / 1000.0);
+		position.y = position.y + speed.y * (deltaTime / 1000.0);
+		position.z = position.z + speed.z * (deltaTime / 1000.0);
 
 		//printf("GYRO: %d\n", read_bytes_mpu(MPU9250_ACCEL_Z));
 		//printf("GYRO X: %d\n", gyroX);
@@ -234,7 +377,7 @@ void mpu_task(void *pvParameters) {
 		//printf("Calibration Steps: %d\n", calibrationSteps);
 		//printf("%d %d %d\n", index_mod(historyZ_index, -2), index_mod(historyZ_index, -1), historyZ_index);
 		//printf("%d\n", xTaskGetTickCount());
-		printf("%f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta);
+		printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
 		//printf("%d\n", oldTime);
 		//printf("*********\n");
 
@@ -272,11 +415,12 @@ void user_init(void) {
 	// fix i2c driver to work with MPU-9250
 	gpio_enable(SCL, GPIO_OUTPUT);
 
-
-
 	// turn off Wemos led
 	gpio_enable(gpio_wemos_led, GPIO_OUTPUT);
 	gpio_write(gpio_wemos_led, 1);
+
+	// reset all usable vectors to 0
+	init_vectors();
 
 	// create pcf task
 	xTaskCreate(pcf_task, "PCF task", 1000, NULL, 2, NULL);
