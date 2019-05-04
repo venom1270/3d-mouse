@@ -45,11 +45,11 @@ typedef struct vect_uint8 {
 	uint8_t z;
 } uint8_vector;
 
-typedef struct vect_uint16 {
-	uint16_t x;
-	uint16_t y;
-	uint16_t z;
-} uint16_vector;
+typedef struct vect_int16 {
+	int16_t x;
+	int16_t y;
+	int16_t z;
+} int16_vector;
 
 vector acceleration;
 vector acceleration_old;
@@ -68,7 +68,7 @@ void reset_vector(vector *vect) {
 	vect->x = 0.0f; vect->y = 0.0f; vect->z = 0.0f;
 }
 
-void reset_uint16_vector(uint16_vector *vect) {
+void reset_int16_vector(int16_vector *vect) {
 	vect->x = 0; vect->y = 0; vect->z = 0;
 }
 
@@ -196,56 +196,9 @@ void init_vectors() {
 	self_test.z = read_byte_mpu(MPU9250_SELF_TEST_Z_ACCEL);
 }
 
-// converts the accelometer output to m/s^2
+// converts the accelometer output to m/s^2 - moved to unity
 float convert_to_accel(int16_t output) {
 	return (output * G_TO_MS) / G_CONST;
-}
-
-void read_accel_mpu(vector *vect_acc, vector *vect_old) {
-
-	// Set the sensitivity of our movement - if we don't breach this value, then don't change acceleration
-	float threshold = 0.5f;	// [m/s^2]
-	float new_accel = 0.0;
-
-	// if acceleration doesn't change in 3 consecutive measures, reset it
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
-	if (absf(new_accel, vect_old->x) > threshold) {
-		// update both acc vectors x
-		vect_acc->x = new_accel;
-		vect_old->x = new_accel;
-
-		// reset change counter
-		unchanged_counter = 0;
-	}
-
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
-	if (absf(new_accel, vect_old->y) > threshold) {
-		// update both acc vectors y
-		vect_acc->y = new_accel;
-		vect_old->y = new_accel;
-
-		// reset change counter
-		unchanged_counter = 0;
-	}
-
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
-	if (absf(new_accel, vect_old->z) > threshold) {
-		// update both acc vectors
-		vect_acc->z = new_accel;
-		vect_old->z = new_accel;
-
-		// reset change counter
-		unchanged_counter = 0;
-	}
-
-	if (unchanged_counter >= MAX_IDLE) {
-		// in this case we assume tablet is not moving, so we reset the acceleration and speed to zero - idle
-		reset_vector(vect_acc);
-		reset_vector(vect_old);
-		reset_vector(&speed);
-	}
-
-	unchanged_counter++;
 }
 
 // Returns POSITIVE(!!) (index+mod)%3
@@ -349,19 +302,29 @@ void mpu_task(void *pvParameters) {
 		
 		//printf("ABS TEST %f | %f\n", rotationZ_delta, fabs(rotationZ_delta));
 
-		read_accel_mpu(&acceleration, &acceleration_old);
+		// ACCEL start
+
+		acceleration.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
+		acceleration.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
+		acceleration.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
+		
+		// ACCEL end
 
 		taskEXIT_CRITICAL();
 
-		// new speed is calculated with a linear formula for integration
-		speed.x = speed.x + acceleration.x * (deltaTime / 1000.0);
-		speed.y = speed.y + acceleration.y * (deltaTime / 1000.0);
-		speed.z = speed.z + acceleration.z * (deltaTime / 1000.0);
+		// ACCEL start
+		
+		// change of speed
+		speed.x = acceleration.x * (deltaTime / 1000.0);
+		speed.y = acceleration.y * (deltaTime / 1000.0);
+		speed.z = acceleration.z * (deltaTime / 1000.0);
 
-		// new position is calculated with a linear formula for integration
-		position.x = position.x + speed.x * (deltaTime / 1000.0);
-		position.y = position.y + speed.y * (deltaTime / 1000.0);
-		position.z = position.z + speed.z * (deltaTime / 1000.0);
+		// change of position - delta
+		position.x = speed.x * (deltaTime / 1000.0);
+		position.y = speed.y * (deltaTime / 1000.0);
+		position.z = speed.z * (deltaTime / 1000.0);
+
+		// ACCEL end
 
 		//printf("GYRO: %d\n", read_bytes_mpu(MPU9250_ACCEL_Z));
 		//printf("GYRO X: %d\n", gyroX);

@@ -3,19 +3,22 @@ using System.Collections.Generic;
 using UnityEngine;
 using System.IO.Ports;
 using System.Threading;
+using System;
 
 public class SerialReadScript : MonoBehaviour
 {
 
     public SerialPort serialPort;
     public string serialPortName = "COM3";
-    public GameObject gameObject;
+    public GameObject OBJECT;
     public float threshold = 0.02f;
-
-    public Vector3 rotationDelta;
-    public Quaternion poseFinal;
-
+    public float positionTHR = 0.00005f;
     
+    public Vector3 rotationDelta;
+    public Vector3 positionDelta;
+
+    public Quaternion poseFinal;
+    public Vector3 positionFinal;
 
     // Start is called before the first frame update
     void Start()
@@ -27,7 +30,8 @@ public class SerialReadScript : MonoBehaviour
             serialPort.Open();
         }
 
-        poseFinal = gameObject.transform.rotation;
+        poseFinal = OBJECT.transform.rotation;
+        positionFinal = OBJECT.transform.localPosition;
         Thread readThread = new Thread(new ThreadStart(Read));
         readThread.Start();
     }
@@ -35,12 +39,12 @@ public class SerialReadScript : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        gameObject.transform.rotation = poseFinal;
+        OBJECT.transform.rotation = poseFinal;
+        OBJECT.transform.localPosition = positionFinal;
     }
 
     void Read()
     {
-
         while (true)
         {
             string reading;
@@ -65,20 +69,32 @@ public class SerialReadScript : MonoBehaviour
         }
     }
 
-    Vector3 ParseLine(string line)
+    Vector3[] ParseLine(string line)
     {
         try
         {
-            string[] split = line.Split(' ');
-            Vector3 vec = new Vector3();
-            vec.x = float.Parse(split[0].Replace('.', ','));
-            vec.y = float.Parse(split[1].Replace('.', ','));
-            vec.z = float.Parse(split[2].Replace('.', ','));
-            return vec;
+            string[] split = line.Replace('.',',')
+                                 .Split(' ');
+            
+            Vector3 vec = new Vector3
+            {
+                x = float.Parse(split[0]),
+                y = float.Parse(split[1]),
+                z = float.Parse(split[2])
+            };
+
+            Vector3 pos = new Vector3
+            {
+                x = float.Parse(split[3]),
+                y = float.Parse(split[4]),
+                z = float.Parse(split[5])
+            };
+
+            return new Vector3[] { vec, pos };
         }
         catch
         {
-            return new Vector3();
+            return new Vector3[] { new Vector3(), new Vector3() };
         }
     }
 
@@ -121,13 +137,16 @@ public class SerialReadScript : MonoBehaviour
             CaluclateRotation();
         }*/
 
-        rotationDelta = ParseLine(reading);
-        CaluclateRotation();
+        Vector3[] tempHolder = ParseLine(reading);
+        rotationDelta = tempHolder[0];
+        positionDelta = tempHolder[1];
 
-
+        CalculateRotation();
+        CalculatePosition();
+        
     }
-
-    void CaluclateRotation()
+    
+    void CalculateRotation()
     {
 
         if (Mathf.Abs(rotationDelta.x) < threshold) rotationDelta.x = 0;
@@ -143,5 +162,14 @@ public class SerialReadScript : MonoBehaviour
             1
         );
         poseFinal = poseInitial * deltaQuaternion;
+    }
+
+    void CalculatePosition()
+    {
+        if (Mathf.Abs(positionDelta.x) < positionTHR) positionDelta.x = 0;
+        if (Mathf.Abs(positionDelta.y) < positionTHR) positionDelta.y = 0;
+        if (Mathf.Abs(positionDelta.z) < positionTHR) positionDelta.z = 0;
+        
+        positionFinal = positionFinal + positionDelta;
     }
 }
