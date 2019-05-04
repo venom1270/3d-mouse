@@ -56,6 +56,8 @@ vector acceleration_old;
 vector speed;
 vector position;
 
+vector gyro;
+
 vector cal;
 
 uint8_vector self_test;
@@ -213,25 +215,15 @@ int8_t index_mod(uint8_t index, int8_t mod) {
 // check MPU-9250 sensor values
 void mpu_task(void *pvParameters) {
 
-	// Runs about every 3ms with no delay
+	// Runs about every 6ms with no delay
 
-	double rotationX = 0;
 	double rotationX_delta = 0;
-	double rotationY = 0;
 	double rotationY_delta = 0;
-	double rotationZ = 0;
 	double rotationZ_delta = 0;
-
-	//uint16_t taskDelay = 5;
-	//uint16_t taskDelaySmoothing = 10; //used before for estimating deltaTime (taskDelay + smoothing) ≃ real delay (delta time)
-
-	double deltaThreshold = 0.1;
 
 	int16_t driftCorrectionX = 0;
 	int16_t driftCorrectionY = 0;
 	int16_t driftCorrectionZ = 0;
-
-	uint16_t calibrationSteps = 0;
 
 	// turn off Wemos led
 	gpio_write(gpio_wemos_led, 1);
@@ -249,13 +241,6 @@ void mpu_task(void *pvParameters) {
 	//double gyro_scaling = 16.4;
 	double gyro_scaling = 131;
 
-	double historyX[3] = {0.0, 0.0, 0.0};
-	double historyY[3] = {0.0, 0.0, 0.0};
-	double historyZ[3] = {0.0, 0.0, 0.0};
-	uint8_t historyX_index = 0;
-	uint8_t historyY_index = 0;
-	uint8_t historyZ_index = 0;
-
 	uint32_t oldTime = xTaskGetTickCount();
 	uint32_t deltaTime = 0;
 
@@ -270,50 +255,29 @@ void mpu_task(void *pvParameters) {
 		deltaTime = xTaskGetTickCount() - oldTime;
 		oldTime += deltaTime;
 
-		int16_t gyroX = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
-		//rotationX_delta = (gyroX * ((taskDelay+taskDelaySmoothing) / 1000.0)) - driftCorrectionX;
-		rotationX_delta = (gyroX * (deltaTime / 1000.0)) - driftCorrectionX;
-		//historyX[historyX_index++] = rotationX_delta;
-		//historyX_index %= 3;
-		//if (!(historyX[index_mod(historyX_index, -2)] == 0.0 && historyX[historyX_index] == 0.0))
-		//	rotationX += historyX[index_mod(historyX_index, -1)];		
-		//if (fabs(rotationX_delta) >= deltaThreshold && !(historyX[index_mod(historyX_index, -2)] == 0.0 && historyX[historyX_index] == 0.0))
-		//	rotationX += rotationX_delta;
+		// Read ACCEL and GYRO
 
-		int16_t gyroY = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
-		//rotationY_delta = (gyroY * ((taskDelay+taskDelaySmoothing) / 1000.0)) - driftCorrectionY;
-		rotationY_delta = (gyroY * (deltaTime / 1000.0)) - driftCorrectionY;
-		//historyY[historyY_index++] = rotationY_delta;
-		//historyY_index %= 3;
-		//if (!(historyY[index_mod(historyY_index, -2)] == 0.0 && historyY[historyY_index] == 0.0))
-		//	rotationY += historyY[index_mod(historyY_index, -1)];
-		//if (fabs(rotationY_delta) >= deltaThreshold && !(historyY[index_mod(historyY_index, -2)] == 0.0 && historyY[historyY_index] == 0.0))
-		//	rotationY += rotationY_delta;
-		
-		int16_t gyroZ = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
-		//rotationZ_delta = (gyroZ * ((taskDelay+taskDelaySmoothing) / 1000.0)) - driftCorrectionZ;
-		rotationZ_delta = (gyroZ * (deltaTime / 1000.0)) - driftCorrectionZ;
-		//historyZ[historyZ_index++] = rotationZ_delta;
-		//historyZ_index %= 3;
-		//if (!(historyZ[index_mod(historyZ_index, -2)] == 0.0 && historyZ[historyZ_index] == 0.0))			
-		//	rotationZ += historyZ[index_mod(historyZ_index, -1)];
-		//if (fabs(rotationZ_delta) >= deltaThreshold && !(historyZ[index_mod(historyZ_index, -2)] == 0.0 && historyZ[historyZ_index] == 0.0))
-		//	rotationZ += rotationZ_delta;
-		
-		//printf("ABS TEST %f | %f\n", rotationZ_delta, fabs(rotationZ_delta));
-
-		// ACCEL start
+		gyro.x = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
+		gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
+		gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
+	
 
 		acceleration.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
 		acceleration.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
 		acceleration.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
 		
-		// ACCEL end
 
 		taskEXIT_CRITICAL();
 
+		// Calculate 
+
+		rotationX_delta = (gyro.x * (deltaTime / 1000.0)) - driftCorrectionX;
+		rotationY_delta = (gyro.y * (deltaTime / 1000.0)) - driftCorrectionY;
+		rotationZ_delta = (gyro.z * (deltaTime / 1000.0)) - driftCorrectionZ;
+
 		// ACCEL start
 		
+
 		// change of speed
 		speed.x = acceleration.x * (deltaTime / 1000.0);
 		speed.y = acceleration.y * (deltaTime / 1000.0);
@@ -324,49 +288,12 @@ void mpu_task(void *pvParameters) {
 		position.y = speed.y * (deltaTime / 1000.0);
 		position.z = speed.z * (deltaTime / 1000.0);
 
-		// ACCEL end
-
-		//printf("GYRO: %d\n", read_bytes_mpu(MPU9250_ACCEL_Z));
-		//printf("GYRO X: %d\n", gyroX);
-		//printf("GYRO Y: %d\n", gyroY);
-		//printf("GYRO Z: %d\n", gyroZ);
-		//printf("ROTATION X DELTA: %f\n", rotationX_delta);
-		//printf("ROTATION Y DELTA: %f\n", rotationY_delta);
-		//printf("ROTATION Z DELTA: %f\n", rotationZ_delta);
-		//printf("ROTATION X: %f\n", rotationX);
-		//printf("ROTATION Y: %f\n", rotationY);
-		//printf("ROTATION Z: %f\n", rotationZ);
-		//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
-		//printf("Calibration Steps: %d\n", calibrationSteps);
-		//printf("%d %d %d\n", index_mod(historyZ_index, -2), index_mod(historyZ_index, -1), historyZ_index);
-		//printf("%d\n", xTaskGetTickCount());
-		printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
-		//printf("%d\n", oldTime);
-		//printf("*********\n");
-
-
-
-		// CALIBRATION -- is this necessary??
-		// GYRO Y has constant 0.06 when still
-		/*if (calibrationSteps > 0) {
-			calibrationSteps--;
-			if (rotationX_delta != 0) {
-				driftCorrectionX += rotationX_delta;
-			}
-			if (rotationY_delta != 0) {
-				driftCorrectionY += rotationY_delta;
-			}
-			if (rotationZ_delta != 0) {
-				driftCorrectionZ += rotationZ_delta;
-			}
-			gpio_write(gpio_wemos_led, 0);
-			if (calibrationSteps == 0) {
-				gpio_write(gpio_wemos_led, 1);
-			}
-		}*/		
 
 		
-		//vTaskDelay(pdMS_TO_TICKS(taskDelay));
+		//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
+		//printf("%d\n", xTaskGetTickCount());
+		printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
+
 
 	}
 }
