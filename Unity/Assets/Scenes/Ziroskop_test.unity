@@ -327,9 +327,13 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   serialPortName: COM3
-  gameObject: {fileID: 1713231665}
+  OBJECT: {fileID: 1713231665}
+  threshold: 0.05
+  positionTHR: 0.00005
   rotationDelta: {x: 0, y: 0, z: 0}
+  positionDelta: {x: 0, y: 0, z: 0}
   poseFinal: {x: 0, y: 0, z: 0, w: 0}
+  positionFinal: {x: 0, y: 0, z: 0}
 --- !u!65 &1713231667
 BoxCollider:
   m_ObjectHideFlags: 0
