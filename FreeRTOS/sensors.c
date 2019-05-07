@@ -51,6 +51,7 @@ typedef struct vect_int16 {
 	int16_t z;
 } int16_vector;
 
+vector new_accel;
 vector acceleration;
 vector acceleration_old;
 vector speed;
@@ -79,6 +80,8 @@ typedef enum {
 	MPU9250_SELF_TEST_X_ACCEL = 0x0d,
 	MPU9250_SELF_TEST_Y_ACCEL = 0x0e,
 	MPU9250_SELF_TEST_Z_ACCEL = 0x0f,
+	INT_ENABLE = 0x38,
+	INT_STATUS = 0x3a,
 	MPU9250_ACCEL_X = 0x3b,
 	MPU9250_ACCEL_Y = 0x3d,
 	MPU9250_ACCEL_Z = 0x3f,
@@ -212,53 +215,49 @@ int8_t index_mod(uint8_t index, int8_t mod) {
 	return i;
 }
 
-void read_accel_mpu(vector *vect_acc, vector *vect_old) {
+void process_accel_mpu(vector *vect_acc, vector *vect_old) {
 
 	// Set the sensitivity of our movement - if we don't breach this value, then don't change acceleration
 	float threshold = 50.0f;	// [m/s^2]
-	float new_accel = 0.0;
 	uint8_t pcf_byte;
 
 	// if acceleration doesn't change in 3 consecutive measures, reset it
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
-	if (absf(new_accel - cal.x, vect_old->x) > threshold) {
-		new_accel = new_accel - cal.x;
+	if (absf(new_accel.x - cal.x, vect_old->x) > threshold) {
+		new_accel.x = new_accel.x - cal.x;
 		// update both acc vectors x
-		vect_acc->x = new_accel;
-		vect_old->x = new_accel;
+		vect_acc->x = new_accel.x;
+		vect_old->x = new_accel.x;
 
 		// reset change counter
 		unchanged_counter = 0;
 	} else {
-		idle_acc[unchanged_counter % MAX_IDLE].x = new_accel;
+		idle_acc[unchanged_counter % MAX_IDLE].x = new_accel.x;
 		vect_acc->x = 0.0f;
 	}
 
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
-	if (absf(new_accel - cal.y, vect_old->y) > threshold) {
-		new_accel = new_accel - cal.y;
+	if (absf(new_accel.y - cal.y, vect_old->y) > threshold) {
+		new_accel.y = new_accel.y - cal.y;
 		// update both acc vectors y
-		vect_acc->y = new_accel;
-		vect_old->y = new_accel;
+		vect_acc->y = new_accel.y;
+		vect_old->y = new_accel.y;
 
 		// reset change counter
 		unchanged_counter = 0;
 	} else {
-		idle_acc[unchanged_counter % MAX_IDLE].y = new_accel;
+		idle_acc[unchanged_counter % MAX_IDLE].y = new_accel.y;
 		vect_acc->y = 0.0f;
 	}
 
-	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
-	if (absf(new_accel - cal.z, vect_old->z) > threshold) {
-		new_accel = new_accel - cal.z;
+	if (absf(new_accel.z - cal.z, vect_old->z) > threshold) {
+		new_accel.z = new_accel.z - cal.z;
 		// update both acc vectors
-		vect_acc->z = new_accel;
-		vect_old->z = new_accel;
+		vect_acc->z = new_accel.z;
+		vect_old->z = new_accel.z;
 
 		// reset change counter
 		unchanged_counter = 0;
 	} else {
-		idle_acc[unchanged_counter % MAX_IDLE].z = new_accel;
+		idle_acc[unchanged_counter % MAX_IDLE].z = new_accel.z;
 		vect_acc->z = 0.0f;
 	}
 
@@ -341,47 +340,50 @@ void mpu_task(void *pvParameters) {
 		// GYRO_OUT = gyro_sensitivity * angular_rate
 		// gyro_sensitivity = 131 LSB/ (stopinje/s)
 
-		
-		taskENTER_CRITICAL();
+		if(read_byte_mpu(INT_STATUS) & 0x01) {
+			taskENTER_CRITICAL();
 
-		deltaTime = xTaskGetTickCount() - oldTime;
-		oldTime += deltaTime;
+			deltaTime = xTaskGetTickCount() - oldTime;
+			oldTime += deltaTime;
 
-		// Read ACCEL and GYRO
+			// Read ACCEL and GYRO
 
-		gyro.x = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
-		gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
-		gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
-	
-		read_accel_mpu(&acceleration, &acceleration_old);
+			gyro.x = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
+			gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
+			gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
 
-		taskEXIT_CRITICAL();
+			new_accel.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
+			new_accel.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
+			new_accel.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
 
-		// Calculate 
+			taskEXIT_CRITICAL();
 
-		rotationX_delta = (gyro.x * (deltaTime / 1000.0)) - driftCorrectionX;
-		rotationY_delta = (gyro.y * (deltaTime / 1000.0)) - driftCorrectionY;
-		rotationZ_delta = (gyro.z * (deltaTime / 1000.0)) - driftCorrectionZ;
+			// Calculate 
 
-		// ACCEL start
-		
+			rotationX_delta = (gyro.x * (deltaTime / 1000.0)) - driftCorrectionX;
+			rotationY_delta = (gyro.y * (deltaTime / 1000.0)) - driftCorrectionY;
+			rotationZ_delta = (gyro.z * (deltaTime / 1000.0)) - driftCorrectionZ;
 
-		// change of speed
-		speed.x += acceleration.x * (deltaTime / 1000.0);
-		speed.y += acceleration.y * (deltaTime / 1000.0);
-		speed.z += acceleration.z * (deltaTime / 1000.0);
+			// ACCEL start
+			
+			process_accel_mpu(&acceleration, &acceleration_old);
 
-		// change of position - delta
-		position.x += speed.x * (deltaTime / 1000.0);
-		position.y += speed.y * (deltaTime / 1000.0);
-		position.z += speed.z * (deltaTime / 1000.0);
+			// change of speed
+			speed.x += acceleration.x * (deltaTime / 1000.0);
+			speed.y += acceleration.y * (deltaTime / 1000.0);
+			speed.z += acceleration.z * (deltaTime / 1000.0);
 
-		
-		//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
-		//printf("%d\n", xTaskGetTickCount());
-		//printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
-		printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
-		
+			// change of position - delta
+			position.x += speed.x * (deltaTime / 1000.0);
+			position.y += speed.y * (deltaTime / 1000.0);
+			position.z += speed.z * (deltaTime / 1000.0);
+
+			
+			//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
+			//printf("%d\n", xTaskGetTickCount());
+			//printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
+			printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
+		}
 
 	}
 }
@@ -399,6 +401,9 @@ void user_init(void) {
 
 	// reset all usable vectors to 0
 	init_vectors();
+
+	// enable data ready interupt
+	write_bytes_mpu(INT_ENABLE, 0x01);
 
 	// create pcf task
 	xTaskCreate(pcf_task, "PCF task", 1000, NULL, 2, NULL);
