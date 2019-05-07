@@ -30,8 +30,8 @@
 
 // 		defines for the accelometer
 #define G_CONST 	16384
-#define G_TO_MS		9.84
-#define MAX_IDLE	5
+#define G_TO_MS		984
+#define MAX_IDLE	20
 
 typedef struct vect {
 	float x;
@@ -59,6 +59,7 @@ vector position;
 vector gyro;
 
 vector cal;
+vector idle_acc[MAX_IDLE];
 
 uint8_vector self_test;
 
@@ -144,7 +145,7 @@ int16_t read_bytes_mpu(mpu9250_quantity quantity) {
 	register_address++;
 	i2c_slave_read(BUS_I2C, MPU_ADDRESS, &register_address, &data_low, 1);
 
-	return (int16_t) (data_high << 8) + data_low;
+	return (data_high << 8) + data_low;
 }
 
 uint8_t read_bytes_mpu_config(mpu9250_quantity quantity) {
@@ -211,6 +212,88 @@ int8_t index_mod(uint8_t index, int8_t mod) {
 	return i;
 }
 
+void read_accel_mpu(vector *vect_acc, vector *vect_old) {
+
+	// Set the sensitivity of our movement - if we don't breach this value, then don't change acceleration
+	float threshold = 50.0f;	// [m/s^2]
+	float new_accel = 0.0;
+	uint8_t pcf_byte;
+
+	// if acceleration doesn't change in 3 consecutive measures, reset it
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
+	if (absf(new_accel - cal.x, vect_old->x) > threshold) {
+		new_accel = new_accel - cal.x;
+		// update both acc vectors x
+		vect_acc->x = new_accel;
+		vect_old->x = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	} else {
+		idle_acc[unchanged_counter % MAX_IDLE].x = new_accel;
+		vect_acc->x = 0.0f;
+	}
+
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
+	if (absf(new_accel - cal.y, vect_old->y) > threshold) {
+		new_accel = new_accel - cal.y;
+		// update both acc vectors y
+		vect_acc->y = new_accel;
+		vect_old->y = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	} else {
+		idle_acc[unchanged_counter % MAX_IDLE].y = new_accel;
+		vect_acc->y = 0.0f;
+	}
+
+	new_accel = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
+	if (absf(new_accel - cal.z, vect_old->z) > threshold) {
+		new_accel = new_accel - cal.z;
+		// update both acc vectors
+		vect_acc->z = new_accel;
+		vect_old->z = new_accel;
+
+		// reset change counter
+		unchanged_counter = 0;
+	} else {
+		idle_acc[unchanged_counter % MAX_IDLE].z = new_accel;
+		vect_acc->z = 0.0f;
+	}
+
+	if (unchanged_counter >= MAX_IDLE) {
+		// in this case we assume tablet is not moving, so we got to reset the acceleration and speed to zero		
+		reset_vector(vect_acc);
+		reset_vector(vect_old);
+		reset_vector(&speed);
+
+		if(unchanged_counter == MAX_IDLE) {
+			
+			pcf_byte = read_byte_pcf();
+			write_byte_pcf(pcf_byte & led2);
+			// do calibration
+			reset_vector(&cal);
+
+			int i;
+			for(i = 0; i < MAX_IDLE; i++) {
+				cal.x += idle_acc[i].x;
+				cal.y += idle_acc[i].y;
+				cal.z += idle_acc[i].z;
+			}
+
+			cal.x /= MAX_IDLE;
+			cal.y /= MAX_IDLE;
+			cal.z /= MAX_IDLE;
+
+			write_byte_pcf(pcf_byte | leds_off);
+
+		}
+
+	}
+
+	unchanged_counter++;
+}
 
 // check MPU-9250 sensor values
 void mpu_task(void *pvParameters) {
@@ -270,18 +353,7 @@ void mpu_task(void *pvParameters) {
 		gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
 		gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
 	
-
-		acceleration.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X)) * 100;
-		acceleration.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y)) * 100;
-		acceleration.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z)) * 100;
-		
-
-		if (fabs(acceleration.x) < 40) acceleration.x = 0;
-		if (fabs(acceleration.y) < 40) acceleration.y = 0;
-
-		history[historyIndex].x = acceleration.x;
-		history[historyIndex++].y = acceleration.x;
-		historyIndex %= 20; 
+		read_accel_mpu(&acceleration, &acceleration_old);
 
 		taskEXIT_CRITICAL();
 
@@ -299,42 +371,15 @@ void mpu_task(void *pvParameters) {
 		speed.y += acceleration.y * (deltaTime / 1000.0);
 		speed.z += acceleration.z * (deltaTime / 1000.0);
 
-
-		bool idle = true;
-		uint8_t i = 0;
-		for (i = 0; i < 20; i++) {
-			if (history[i].x != 0) {
-				idle = false;
-				break;
-			}
-		}
-		if (idle) {
-			speed.x = 0;
-		}
-
-		idle = true;
-		i = 0;
-		for (i = 0; i < 20; i++) {
-			if (history[i].y != 0) {
-				idle = false;
-				break;
-			}
-		}
-		if (idle) {
-			speed.y = 0;
-		}
-
-
 		// change of position - delta
 		position.x += speed.x * (deltaTime / 1000.0);
 		position.y += speed.y * (deltaTime / 1000.0);
 		position.z += speed.z * (deltaTime / 1000.0);
 
-
 		
 		//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
 		//printf("%d\n", xTaskGetTickCount());
-		printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
+		//printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
 		printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
 		
 
