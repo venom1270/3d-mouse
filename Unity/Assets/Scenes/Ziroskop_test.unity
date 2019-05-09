@@ -288,7 +288,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 807058425}
   m_LocalRotation: {x: -0.24750638, y: 0, z: 0, w: 0.9688863}
-  m_LocalPosition: {x: 0, y: -3.95, z: -10}
+  m_LocalPosition: {x: 0, y: -10.9, z: -23.63}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_Children: []
   m_Father: {fileID: 0}
@@ -332,8 +332,13 @@ MonoBehaviour:
   positionTHR: 0.00005
   rotationDelta: {x: 0, y: 0, z: 0}
   positionDelta: {x: 0, y: 0, z: 0}
+  positionFactor: 1
   poseFinal: {x: 0, y: 0, z: 0, w: 0}
   positionFinal: {x: 0, y: 0, z: 0}
+  deltaTime: 0
+  speed: {x: 0, y: 0, z: 0}
+  speedHistoryThreshold: 5
+  gravitationalOffset: {x: 0, y: 0, z: 0}
 --- !u!65 &1713231667
 BoxCollider:
   m_ObjectHideFlags: 0

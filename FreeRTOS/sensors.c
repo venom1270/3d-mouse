@@ -332,8 +332,10 @@ void mpu_task(void *pvParameters) {
 	//double historyY[20];
 	//uint8_t historyIndexY = 0;
 
-	vector history[20];
-	uint8_t historyIndex = 0;
+	//vector history[20];
+	//uint8_t historyIndex = 0;
+
+	float accelZ = 0;
 
 	while (1) {
 
@@ -356,6 +358,8 @@ void mpu_task(void *pvParameters) {
 			new_accel.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
 			new_accel.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
 
+			accelZ = new_accel.z / 100.0;
+
 			taskEXIT_CRITICAL();
 
 			// Calculate 
@@ -369,7 +373,7 @@ void mpu_task(void *pvParameters) {
 			process_accel_mpu(&acceleration, &acceleration_old);
 
 			// change of speed
-			speed.x += acceleration.x * (deltaTime / 1000.0);
+			/*speed.x += acceleration.x * (deltaTime / 1000.0);
 			speed.y += acceleration.y * (deltaTime / 1000.0);
 			speed.z += acceleration.z * (deltaTime / 1000.0);
 
@@ -377,12 +381,13 @@ void mpu_task(void *pvParameters) {
 			position.x += speed.x * (deltaTime / 1000.0);
 			position.y += speed.y * (deltaTime / 1000.0);
 			position.z += speed.z * (deltaTime / 1000.0);
-
+			*/
 			
 			//printf("CONFIG: %d\n", read_bytes_mpu_config(MPU9250_GYRO_CONFIG) & 0b00011000);
 			//printf("%d\n", xTaskGetTickCount());
 			//printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
-			printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
+			//printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
+			printf("%f %f %f %f %f %f %d %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, acceleration.x, acceleration.y, acceleration.z, deltaTime, accelZ);
 		}
 
 	}
