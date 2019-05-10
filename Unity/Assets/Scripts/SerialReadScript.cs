@@ -35,7 +35,81 @@ public class SerialReadScript : MonoBehaviour
     Color renderColor;
 
     Color colorRed;
+    Color colorBlue;
     Color colorDefault;
+
+    History accelerationHistory;
+    History rotationHistory;
+    public int historyLength = 5;
+
+    private Color[] buttonColors;
+    private GameObject[] buttons;
+    private int[] buttonTimer;
+
+    class History
+    {
+        Vector3[] items;
+        int index = 0;
+
+        public History(int size)
+        {
+            items = new Vector3[size];
+        }
+
+        public void Add(Vector3 item)
+        {
+            items[index] = item;
+            index = (index + 1) % items.Length;
+        }
+
+        public Vector3 GetAverage()
+        {
+            Vector3 sum = new Vector3();
+            foreach(Vector3 i in items)
+            {
+                sum += i;
+            }
+            return sum / items.Length;
+        }
+
+        public Vector3 GetAverageNoExtremes()
+        {
+            Vector3 sum = new Vector3();
+            Vector3 max = new Vector3();
+            Vector3 min = new Vector3();
+            foreach (Vector3 i in items)
+            {
+                sum += i;
+                max = Max(max, i);
+                min = Min(min, i);
+            }
+
+            sum = sum - max - min;
+
+            return sum / (items.Length - 2);
+        }
+
+        private Vector3 Max(Vector3 a, Vector3 b)
+        {
+            return new Vector3()
+            {
+                x = Math.Max(a.x, b.x),
+                y = Math.Max(a.y, b.y),
+                z = Math.Max(a.z, b.z)
+            };
+        }
+
+        private Vector3 Min(Vector3 a, Vector3 b)
+        {
+            return new Vector3()
+            {
+                x = Math.Min(a.x, b.x),
+                y = Math.Min(a.y, b.y),
+                z = Math.Min(a.z, b.z)
+            };
+        }
+
+    }
 
     // Start is called before the first frame update
     void Start()
@@ -52,9 +126,20 @@ public class SerialReadScript : MonoBehaviour
         speedHistoryCounter = new Vector3Int();
         positionFinal = OBJECT.transform.localPosition;
         rot = new Vector3[3] { new Vector3(), new Vector3(), new Vector3() };
+        accelerationHistory = new History(historyLength);
+        rotationHistory = new History(historyLength);
         Thread readThread = new Thread(new ThreadStart(Read));
         colorRed = new Color(255, 0, 0);
+        colorBlue = new Color(0, 0, 255);
         colorDefault = this.GetComponent<Renderer>().material.color;
+        buttons = new GameObject[4];
+        buttonColors = new Color[4];
+        buttonTimer = new int[4];
+        for (int i = 0; i < 4; i++)
+        {
+            buttons[i] = GameObject.Find("Button " + (i + 1));
+            buttonColors[i] = colorDefault;
+        }
         renderColor = colorDefault;
         readThread.Start();
     }
@@ -63,7 +148,7 @@ public class SerialReadScript : MonoBehaviour
     void Update()
     {
         // TEST: Fix X and Y angles to 0 if Z axis has maximum gravitational force -> tablet is on the table
-        if (gravitationalForceZ > 11 && speedHistoryCounter.z > 350)
+        if (gravitationalForceZ > 11 && speedHistoryCounter.z > 200)
         {
             poseFinal = transform.rotation = Quaternion.Euler(0, 0, poseFinal.eulerAngles.z);
         }
@@ -74,6 +159,18 @@ public class SerialReadScript : MonoBehaviour
         rot[0] = OBJECT.transform.up;
         rot[1] = OBJECT.transform.right;
         rot[2] = OBJECT.transform.forward;
+
+        for (int i = 0; i < 4; i++)
+        {
+            if (buttonTimer[i] > 0)
+                buttonTimer[i]--;
+            else
+                buttonColors[i] = colorDefault;
+
+            // Not really optimal to set this every update.. change if you have enought time...
+            buttons[i].GetComponent<Renderer>().material.color = buttonColors[i];
+        }
+
     }
 
     void Read()
@@ -102,34 +199,61 @@ public class SerialReadScript : MonoBehaviour
         }
     }
 
+    void ProcessButtonPress(string button)
+    {
+        switch (button)
+        {
+            case "1": Debug.Log("Button 1"); break;
+            case "2": Debug.Log("Button 2"); break;
+            case "3": Debug.Log("Button 3"); break;
+            case "4": Debug.Log("Button 4"); break;
+            default: Debug.Log("Unknown button"); break;
+        }
+        int i = int.Parse(button) - 1;
+        buttonColors[i] = colorBlue;
+        buttonTimer[i] = 20;
+    }
+
     Vector3[] ParseLine(string line)
     {
         try
         {
             string[] split = line.Replace('.',',')
                                  .Split(' ');
+
+            if (split.Length == 1)
+            {
+                // Button press
+                ProcessButtonPress(split[0]);               
+
+                return new Vector3[] { new Vector3(), new Vector3(), new Vector3() };
+            }
+            else
+            {
+                // Acc and gyro data
+                Vector3 vec = new Vector3
+                {
+                    x = float.Parse(split[0]),
+                    y = float.Parse(split[1]),
+                    z = float.Parse(split[2])
+                };
+
+                Vector3 pos = new Vector3
+                {
+                    x = float.Parse(split[3]),
+                    y = float.Parse(split[4]),
+                    z = float.Parse(split[5])
+                };
+
+                Vector3 dt = new Vector3
+                {
+                    x = int.Parse(split[6]) / 1000.0f,
+                    y = float.Parse(split[7])
+                };
+
+                return new Vector3[] { vec, pos, dt };
+            }
             
-            Vector3 vec = new Vector3
-            {
-                x = float.Parse(split[0]),
-                y = float.Parse(split[1]),
-                z = float.Parse(split[2])
-            };
-
-            Vector3 pos = new Vector3
-            {
-                x = float.Parse(split[3]),
-                y = float.Parse(split[4]),
-                z = float.Parse(split[5])
-            };
-
-            Vector3 dt = new Vector3
-            {
-                x = int.Parse(split[6]) / 1000.0f,
-                y = float.Parse(split[7])
-            };
-
-            return new Vector3[] { vec, pos, dt };
         }
         catch
         {
@@ -139,48 +263,18 @@ public class SerialReadScript : MonoBehaviour
 
     void Parse(string reading)
     {
-        /*
-        if (reading.StartsWith("ROTATION X:"))
-        {
-            float angle = GetAngle(reading);
-            rotation.x = -angle;
-        }
-        else if (reading.StartsWith("ROTATION Y:"))
-        {
-            float angle = GetAngle(reading);
-            rotation.z = -angle;
-        }
-        else if (reading.StartsWith("ROTATION Z:"))
-        {
-            float angle = GetAngle(reading);
-            rotation.y = -angle;
-        }
-        */
-
-        /*if (reading.StartsWith("ROTATION X DELTA:"))
-        {
-            float angle = GetAngle(reading, 3);
-            rotationDelta.x = -angle;
-        }
-        else if (reading.StartsWith("ROTATION Y DELTA:"))
-        {
-            float angle = GetAngle(reading, 3);
-            rotationDelta.z = -angle;
-        }
-        else if (reading.StartsWith("ROTATION Z DELTA:"))
-        {
-            float angle = GetAngle(reading, 3);
-            rotationDelta.y = -angle;
-
-            // Z is last so we can calculate rotation...
-            CaluclateRotation();
-        }*/
 
         Vector3[] tempHolder = ParseLine(reading);
         rotationDelta = tempHolder[0];
         positionDelta = tempHolder[1];
         deltaTime = tempHolder[2].x;
         gravitationalForceZ = tempHolder[2].y;
+
+        accelerationHistory.Add(positionDelta);
+        positionDelta = accelerationHistory.GetAverageNoExtremes();
+
+        rotationHistory.Add(rotationDelta);
+        rotationDelta = rotationHistory.GetAverageNoExtremes();
 
 
         CalculateRotation();
@@ -222,7 +316,7 @@ public class SerialReadScript : MonoBehaviour
         // change of position - delta
         positionFinal.x += speed.x * deltaTime;
         positionFinal.y += speed.y * deltaTime;
-        positionFinal.z += speed.z * deltaTime;
+        positionFinal.z -= speed.z * deltaTime;
 
         positionFinal = positionFinal * positionFactor;
         //positionFinal.z = 0;
@@ -252,7 +346,7 @@ public class SerialReadScript : MonoBehaviour
         {
             positionDelta.x = 0;
             positionDelta.y = 0;
-            positionDelta.z = 0;
+            if (Math.Abs(rotX) > 10 || Math.Abs(rotY) > 10)  positionDelta.z = 0;
             renderColor = colorRed;
         }
         else

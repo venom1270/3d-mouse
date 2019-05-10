@@ -125,11 +125,16 @@ void pcf_task(void *pvParameters) {
 		if ((pcf_byte & button3) == 0) {
 			// clear buttons states and turn off led 3
 			write_byte_pcf((pcf_byte | ~led3) | clr_btn);
-
+			printf("3\n");
 			// button 4 is pressed
 		} else if ((pcf_byte & button4) == 0) {
 			// blink led 4
 			write_byte_pcf(pcf_byte ^ ~led4);
+			printf("4\n");
+		} else if ((pcf_byte & button1) == 0) {
+			printf("1\n");
+		} else if ((pcf_byte & button2) == 0) {
+			printf("2\n");
 		}
 
 		// check again after 200 ms
@@ -150,6 +155,24 @@ int16_t read_bytes_mpu(mpu9250_quantity quantity) {
 
 	return (data_high << 8) + data_low;
 }
+
+// read 6 bytes from MPU-9250 on I2C bus
+int16_vector read_3_bytes_mpu(mpu9250_quantity quantity) {
+
+	// high and low byte of quantity
+	uint8_t data[6];
+	uint8_t register_address = (uint8_t) quantity;
+
+	i2c_slave_read(BUS_I2C, MPU_ADDRESS, &register_address, data, 6);
+
+	int16_vector result;
+	result.x = (data[0] << 8) + data[1];
+	result.y = (data[2] << 8) + data[3];
+	result.z = (data[4] << 8) + data[5]; 
+
+	return result;
+}
+
 
 uint8_t read_bytes_mpu_config(mpu9250_quantity quantity) {
 
@@ -336,6 +359,8 @@ void mpu_task(void *pvParameters) {
 	//uint8_t historyIndex = 0;
 
 	float accelZ = 0;
+	int16_vector gyro_raw;
+	int16_vector accel_raw;
 
 	while (1) {
 
@@ -350,13 +375,24 @@ void mpu_task(void *pvParameters) {
 
 			// Read ACCEL and GYRO
 
-			gyro.x = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
-			gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
-			gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
+			
+			gyro_raw = read_3_bytes_mpu(MPU9250_GYRO_X);
+			gyro.x = (int16_t) gyro_raw.x / gyro_scaling;
+			gyro.y = (int16_t) gyro_raw.y / gyro_scaling;
+			gyro.z = (int16_t) gyro_raw.z / gyro_scaling;
 
-			new_accel.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
-			new_accel.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
-			new_accel.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
+			//gyro.x = (int16_t) read_bytes_mpu(MPU9250_GYRO_X) / gyro_scaling;
+			//gyro.y = (int16_t) read_bytes_mpu(MPU9250_GYRO_Y) / gyro_scaling;
+			//gyro.z = (int16_t) read_bytes_mpu(MPU9250_GYRO_Z) / gyro_scaling;
+
+			accel_raw = read_3_bytes_mpu(MPU9250_ACCEL_X);
+			new_accel.x = convert_to_accel(accel_raw.x);
+			new_accel.y = convert_to_accel(accel_raw.y);
+			new_accel.z = convert_to_accel(accel_raw.z);
+
+			//new_accel.x = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_X));
+			//new_accel.y = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Y));
+			//new_accel.z = convert_to_accel(read_bytes_mpu(MPU9250_ACCEL_Z));
 
 			accelZ = new_accel.z / 100.0;
 
@@ -388,6 +424,7 @@ void mpu_task(void *pvParameters) {
 			//printf("%f %f %f\n", acceleration.x, acceleration.y, acceleration.z);
 			//printf("%f %f %f %f %f %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, position.x, position.y, position.z);
 			printf("%f %f %f %f %f %f %d %f\n", rotationX_delta, rotationY_delta, rotationZ_delta, acceleration.x, acceleration.y, acceleration.z, deltaTime, accelZ);
+			//printf("%d\n", deltaTime);
 		}
 
 	}
