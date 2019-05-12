@@ -49,6 +49,7 @@ public class SerialReadScript : MonoBehaviour
 
     public Button connectButton;
     public Dropdown dropdown;
+    public InputField inputPort;
     public Text connectionStatus;
     bool connected = false;
 
@@ -121,7 +122,8 @@ public class SerialReadScript : MonoBehaviour
     {
         if (connected == false)
         {
-            string port = dropdown.options[dropdown.value].text;
+            //string port = dropdown.options[dropdown.value].text;
+            string port = inputPort.text;
             Debug.Log(port);
 
             try
