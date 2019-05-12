@@ -1,6 +1,7 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using System.IO.Ports;
 using System.Threading;
 using System;
@@ -45,6 +46,11 @@ public class SerialReadScript : MonoBehaviour
     private Color[] buttonColors;
     private GameObject[] buttons;
     private int[] buttonTimer;
+
+    public Button connectButton;
+    public Dropdown dropdown;
+    public Text connectionStatus;
+    bool connected = false;
 
     class History
     {
@@ -111,65 +117,97 @@ public class SerialReadScript : MonoBehaviour
 
     }
 
+    void TryConnect()
+    {
+        if (connected == false)
+        {
+            string port = dropdown.options[dropdown.value].text;
+            Debug.Log(port);
+
+            try
+            {
+                serialPort = new SerialPort(port, 115200);
+
+                if (serialPort.IsOpen == false)
+                {
+                    serialPort.Open();
+                }
+
+                poseFinal = OBJECT.transform.rotation;
+                speed = new Vector3();
+                speedHistoryCounter = new Vector3Int();
+                positionFinal = OBJECT.transform.localPosition;
+                rot = new Vector3[3] { new Vector3(), new Vector3(), new Vector3() };
+                accelerationHistory = new History(historyLength);
+                rotationHistory = new History(historyLength);
+                Thread readThread = new Thread(new ThreadStart(Read));
+                colorRed = new Color(255, 0, 0);
+                colorBlue = new Color(0, 0, 255);
+                colorDefault = this.GetComponent<Renderer>().material.color;
+                buttons = new GameObject[4];
+                buttonColors = new Color[4];
+                buttonTimer = new int[4];
+                for (int i = 0; i < 4; i++)
+                {
+                    buttons[i] = GameObject.Find("Button " + (i + 1));
+                    buttonColors[i] = colorDefault;
+                }
+                renderColor = colorDefault;
+                readThread.Start();
+                connectionStatus.text = "CONNECTED!";
+                connected = true;
+            }
+            catch (Exception e)
+            {
+                connectionStatus.text = e.ToString();
+                Debug.Log(e);
+            }
+            
+        }
+
+        
+
+    }
+
     // Start is called before the first frame update
     void Start()
     {
-        serialPort = new SerialPort(serialPortName, 115200);
+        connected = false;
+        connectButton.onClick.AddListener(TryConnect);
 
-        if (serialPort.IsOpen == false)
-        {
-            serialPort.Open();
-        }
-
-        poseFinal = OBJECT.transform.rotation;
-        speed = new Vector3();
-        speedHistoryCounter = new Vector3Int();
-        positionFinal = OBJECT.transform.localPosition;
-        rot = new Vector3[3] { new Vector3(), new Vector3(), new Vector3() };
-        accelerationHistory = new History(historyLength);
-        rotationHistory = new History(historyLength);
-        Thread readThread = new Thread(new ThreadStart(Read));
-        colorRed = new Color(255, 0, 0);
-        colorBlue = new Color(0, 0, 255);
-        colorDefault = this.GetComponent<Renderer>().material.color;
-        buttons = new GameObject[4];
-        buttonColors = new Color[4];
-        buttonTimer = new int[4];
-        for (int i = 0; i < 4; i++)
-        {
-            buttons[i] = GameObject.Find("Button " + (i + 1));
-            buttonColors[i] = colorDefault;
-        }
-        renderColor = colorDefault;
-        readThread.Start();
     }
 
     // Update is called once per frame
     void Update()
     {
-        // TEST: Fix X and Y angles to 0 if Z axis has maximum gravitational force -> tablet is on the table
-        if (gravitationalForceZ > 11 && speedHistoryCounter.z > 200)
+        if (connected)
         {
-            poseFinal = transform.rotation = Quaternion.Euler(0, 0, poseFinal.eulerAngles.z);
+            // TEST: Fix X and Y angles to 0 if Z axis has maximum gravitational force -> tablet is on the table
+            if (gravitationalForceZ > 11 && speedHistoryCounter.z > 200)
+            {
+                poseFinal = transform.rotation = Quaternion.Euler(0, 0, poseFinal.eulerAngles.z);
+            }
+
+            OBJECT.transform.rotation = poseFinal;
+            OBJECT.transform.localPosition = positionFinal;
+            this.GetComponent<Renderer>().material.color = renderColor;
+            rot[0] = OBJECT.transform.up;
+            rot[1] = OBJECT.transform.right;
+            rot[2] = OBJECT.transform.forward;
+
+            for (int i = 0; i < 4; i++)
+            {
+                if (buttonTimer[i] > 0)
+                    buttonTimer[i]--;
+                else
+                    buttonColors[i] = colorDefault;
+
+                // Not really optimal to set this every update.. change if you have enought time...
+                buttons[i].GetComponent<Renderer>().material.color = buttonColors[i];
+            }
         }
 
-        OBJECT.transform.rotation = poseFinal;
-        OBJECT.transform.localPosition = positionFinal;
-        this.GetComponent<Renderer>().material.color = renderColor;
-        rot[0] = OBJECT.transform.up;
-        rot[1] = OBJECT.transform.right;
-        rot[2] = OBJECT.transform.forward;
-
-        for (int i = 0; i < 4; i++)
-        {
-            if (buttonTimer[i] > 0)
-                buttonTimer[i]--;
-            else
-                buttonColors[i] = colorDefault;
-
-            // Not really optimal to set this every update.. change if you have enought time...
-            buttons[i].GetComponent<Renderer>().material.color = buttonColors[i];
-        }
+        
 
     }
 
