@@ -1,6 +1,13 @@
 # 3D-Mouse
 3D-like mouse/controller using FreeRTOS and Unity.
 
+# Contents
+
+- FreeRTOS/ - implementation of sensor reading in C
+- Unity/ - implementation of calculation and visualization of 3D mouse in Unity
+- Executable/ - .exe program (so you don't have to download Unity)
+- Report.pdf
+
 # How to run
 2 options:
 - Download Unity and run from Unity editor (implemented with version 2019.1.0f2) or
