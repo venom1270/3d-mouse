@@ -203,8 +203,8 @@ public class SerialReadScript : MonoBehaviour
     {
         switch (button)
         {
-            case "1": Debug.Log("Button 1"); break;
-            case "2": Debug.Log("Button 2"); break;
+            case "1": positionFinal = Vector3.zero; Debug.Log("Button 1"); break;
+            case "2": poseFinal = Quaternion.identity; Debug.Log("Button 2"); break;
             case "3": Debug.Log("Button 3"); break;
             case "4": Debug.Log("Button 4"); break;
             default: Debug.Log("Unknown button"); break;
